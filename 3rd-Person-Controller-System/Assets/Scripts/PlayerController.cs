@@ -11,6 +11,8 @@ public class PlayerController : MonoBehaviour
     public float jumpHeight = 1.5f;
     public float rollForce = 2f;
     [Range(0.01f, 1f)]
+    public float rollMultiplier = 1f;
+    [Range(0.01f, 1f)]
     public float airControlPercentage;
     public float turnSmoothTime = 0.2f;
 
@@ -57,8 +59,6 @@ public class PlayerController : MonoBehaviour
     bool _isRolling = false;
     [SerializeField]
     bool _rollButtonPressed = false;
-    [SerializeField]
-    bool _canAim = true;
     #endregion
 
     #region Unity Methods
@@ -77,6 +77,7 @@ public class PlayerController : MonoBehaviour
         animState = anim.GetCurrentAnimatorStateInfo(0);
 
         HandlePlayerInput();
+        CheckIfAiming();
 
         CalculateMovement();
         CalculateRotation();
@@ -127,26 +128,24 @@ public class PlayerController : MonoBehaviour
         else
             _isAttacking = false;
 
-        if (Input.GetMouseButton(1) && detector.nearestTarget != null && _canAim)
-            _isAiming = true;
-        else
-            _isAiming = false;
-
         if (Input.GetKeyDown(KeyCode.LeftShift) && _isGrounded && mCanRegisterAttack)
             _rollButtonPressed = true;
     }
 
     void CalculateMovement()
     {
+        //To ensure we don't have vertical movement, set gravity to 0 when we are grounded
         float _gravity = _isGrounded ? 0f : Physics.gravity.y;
 
-        //This is to set different types of movement system when the player is aiming 
+        //Different type of movement when we are moving 
         if (!_isAiming)
         {
+            //This system only moves the player forward depending on the direction it is facing
             _moveDir = transform.forward * _speed * _inputs.magnitude + Vector3.up * _gravity;
         }
         else
         {
+            //This system moves the player in all 4 directions without considering which direction it is facing
             Vector3 _vDir = transform.forward * _inputs.z * _speed;
             Vector3 _hDir = transform.right * _inputs.x * _speed;
             _moveDir = _vDir + _hDir + Vector3.up * _gravity;
@@ -161,6 +160,9 @@ public class PlayerController : MonoBehaviour
         }
         else
         {
+            //Rotations are calculated based on movement keys and camera
+            //e.g. if A key is pressed, the rotation will be 90 degrees to the left etc
+            //Smoothing is applied so it makes the rotation more fluid. 
             float angle = Mathf.Atan2(_inputs.x, _inputs.z) * Mathf.Rad2Deg + cam.transform.eulerAngles.y;
             float targetAngle = Mathf.SmoothDampAngle(transform.eulerAngles.y, angle, ref _turnSmoothVelocity, turnSmoothTime);
             targetRotation = Quaternion.Euler(0f, targetAngle, 0f);
@@ -169,7 +171,7 @@ public class PlayerController : MonoBehaviour
 
     void RotateToTarget()
     {
-        Vector3 targetDir = detector.nearestTarget.transform.position - transform.position;
+        Vector3 targetDir = detector.lockedOnTarget.transform.position - transform.position;
         targetDir.y = 0f;
         Quaternion desiredRotation = Quaternion.LookRotation(targetDir);
         targetRotation = Quaternion.Slerp(transform.rotation, desiredRotation, 0.2f);
@@ -191,17 +193,20 @@ public class PlayerController : MonoBehaviour
     {
         if (CheckIsGrounded())
         {
+            //Set is grounded to true and the player's position to the surface of the ground
             _isGrounded = true;
             transform.position = Vector3.Lerp(transform.position, hit.point, 0.2f);
 
+            //Check if jump button is pressed, then we reset it (like a trigger)
             if (_isJumping)
                 _isJumping = false;
 
+            //Check if the player is previously in the air
             if (_isInAir)
             {
-                //Just landed
+                //Just landed 
                 if (animState.IsName("Falling"))
-                    StartCoroutine(Land(1f));
+                    StartCoroutine(DisableInput(1f));
                 _isInAir = false;
                 _inAirTimer = 0f;
             }
@@ -213,8 +218,10 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    IEnumerator Land(float timer)
+    //Temporarily disable any movement so it doesn't move the player during fall animation
+    IEnumerator DisableInput(float timer)
     {
+        yield return new WaitForSeconds(0.1f);  //Hard implemented fixed..need to change this in the future
         _allowInput = false;
         yield return new WaitForSeconds(timer);
         _allowInput = true;
@@ -222,6 +229,8 @@ public class PlayerController : MonoBehaviour
 
     void HandleJump()
     {
+        //Basic physics to make the player jump 
+        //Distance of jump is also based on the velocity in the forward direction
         if (_isJumping && _isGrounded)
         {
             float jumpVelocity = Mathf.Sqrt(-2 * Physics.gravity.y * jumpHeight);
@@ -230,6 +239,7 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    //Temporarily disable ground check to ensure the check is not instantly applied when the player jumps
     IEnumerator SkipGroundCheck(float timer)
     {
         _skipGroundCheck = true;
@@ -254,7 +264,7 @@ public class PlayerController : MonoBehaviour
     {
         if (_rollButtonPressed)
         {
-            StartCoroutine(TurnOffAim(1.5f));
+            StartCoroutine(DisableInput(1.0f));
 
             anim.SetTrigger("Roll");
             _isRolling = CheckForRoll();
@@ -264,30 +274,26 @@ public class PlayerController : MonoBehaviour
             anim.ResetTrigger("Roll");
         }
 
+        //Set rolling force depending on whether player is moving or not        
         if (_isRolling)
         {
             float rollAmount = rollForce;
             if (_inputs != Vector3.zero)
-                rollAmount = rollForce - 1.0f;
+                rollAmount = rollForce * rollMultiplier;
  
             rb.AddForce(transform.forward * rollAmount, ForceMode.Impulse);
             _rollButtonPressed = false;
-            _isRolling = CheckForRoll();    //Here we wanna check if we still in rolling animation
+            _isRolling = CheckForRoll();    //Here we want to check if we still in rolling animation
         }
     }
 
-    IEnumerator TurnOffAim(float time)
-    {
-        _canAim = false;
-        yield return new WaitForSeconds(time);
-        _canAim = true;
-    }
 
     bool CheckIsGrounded()
     {
         if (_skipGroundCheck)
             return false;
 
+        //Simple raycasting from the players feet to the ground to check if grounded
         Vector3 origin = transform.position + (Vector3.up * groundDetectionStartPoint);
         float distance = groundDetectionStartPoint + groundDirectionRayDistance;
         return Physics.Raycast(origin, Vector3.down, out hit, distance);
@@ -307,11 +313,25 @@ public class PlayerController : MonoBehaviour
         return true;
     }
 
+    void CheckIfAiming()
+    {
+        //To allow roll even when the player is aiming
+        if (_rollButtonPressed || CheckForRoll())
+        {
+            _isAiming = false;
+            return;
+        }
+
+        //If there is a target locked on, it means player is aiming
+        _isAiming = detector.lockedOnTarget != null;
+    }
+
     bool CheckForRoll()
     {
         return animState.IsName("Roll");
     }
 
+    //Handles all the animation
     void HandleAnimation()
     {
         anim.SetBool("Aim", _isAiming);

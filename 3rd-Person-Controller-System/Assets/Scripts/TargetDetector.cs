@@ -8,11 +8,14 @@ public class TargetDetector : MonoBehaviour
     public List<Transform> targets;
     public float detectionRadius = 10f;
     public Transform nearestTarget;
+    public Transform lockedOnTarget;
 
     PlayerController controller;
     Camera cam;
     Vector2 camCenter;
     int enemyLayer;
+
+    bool mCanChangeTarget = true;
 
     void Start()
     {
@@ -25,9 +28,37 @@ public class TargetDetector : MonoBehaviour
 
     void Update()
     {
+        HandleTargetAim();
+
         FindTargetsInPlayerFOV();
         UpdateNearestTarget();
     }
+
+
+    void HandleTargetAim()
+    {
+        if (lockedOnTarget != null)
+        {
+            if(!IsInPlayerFOV(lockedOnTarget.position))
+            {
+                lockedOnTarget = null;
+            }
+        }
+
+        if (Input.GetMouseButtonUp(1))
+        {
+            mCanChangeTarget = true;
+        }
+
+        if(Input.GetMouseButton(1))
+        {
+            if(mCanChangeTarget && nearestTarget != null)
+            {
+                lockedOnTarget = nearestTarget;
+            }
+        }
+    }
+
 
     //Finds all targets visible to player's FOV
     void FindTargetsInPlayerFOV()
@@ -72,21 +103,22 @@ public class TargetDetector : MonoBehaviour
         if (targets.Count == 0)
         {
             nearestTarget = null;
+            lockedOnTarget = null;
             return;
         }
 
         //If player is aiming at a target, lock the target if it is still within the player's FOV
-        if (controller._isAiming)
-        {
-            if(nearestTarget != null)
-            {
-                if(!IsInPlayerFOV(nearestTarget.position))
-                {
-                    nearestTarget = null;
-                }
-            }
-            return;
-        }
+        //if (controller._isAiming)
+        //{
+        //    if(nearestTarget != null)
+        //    {
+        //        if(!IsInPlayerFOV(nearestTarget.position))
+        //        {
+        //            nearestTarget = null;
+        //        }
+        //    }
+        //    return;
+        //}
 
         float minDistance = Mathf.Infinity;
 
